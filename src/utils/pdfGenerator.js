@@ -117,13 +117,15 @@ function generateInvoicePdf(invoiceData) {
       const rowBg = idx % 2 === 0 ? '#f9f9f9' : '#ffffff';
       doc.rect(50, rowY - 3, 495, 20).fillColor(rowBg).fill();
 
-      const itemTotal = (item.price || 0) * (item.quantity || 1);
+      const itemPrice = item.price != null ? item.price : 0;
+      const itemQty = item.quantity != null ? item.quantity : 1;
+      const itemTotal = itemPrice * itemQty;
       doc
         .fillColor('#333')
         .text(item.name || 'Item', colItem + 5, rowY)
-        .text(String(item.quantity || 1), colQty, rowY)
-        .text(formatCurrency(item.price || subtotal), colPrice, rowY)
-        .text(formatCurrency(itemTotal || subtotal), colTotal, rowY);
+        .text(String(itemQty), colQty, rowY)
+        .text(formatCurrency(itemPrice), colPrice, rowY)
+        .text(formatCurrency(itemTotal), colTotal, rowY);
 
       rowY += 22;
     });

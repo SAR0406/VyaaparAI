@@ -41,12 +41,11 @@ async function handleReminder({ from, entities, language, businessPhoneId }) {
  */
 function buildReminderMessage({ customerName, amount, daysOverdue, language }) {
   const amountStr = amount ? formatCurrency(amount) : '';
-  const overdueStr = daysOverdue ? ` (${daysOverdue} दिन से)` : '';
 
   const messages = {
     hindi: `नमस्ते ${customerName} जी 🙏
 
-आपकी${overdueStr} payment ${amountStr ? `*${amountStr}*` : ''} अभी तक pending है।
+आपकी${daysOverdue ? ` (${daysOverdue} दिन से)` : ''} payment ${amountStr ? `*${amountStr}*` : ''} अभी तक pending है।
 
 कृपया जल्द से जल्द payment करें। 
 धन्यवाद! 🙏
@@ -55,14 +54,14 @@ function buildReminderMessage({ customerName, amount, daysOverdue, language }) {
 
     marathi: `नमस्कार ${customerName} जी 🙏
 
-तुमची payment ${amountStr ? `*${amountStr}*` : ''}${overdueStr} अद्याप बाकी आहे.
+तुमची payment ${amountStr ? `*${amountStr}*` : ''}${daysOverdue ? ` (${daysOverdue} दिवसांपासून)` : ''} अद्याप बाकी आहे.
 
 कृपया लवकर payment करा.
 धन्यवाद! 🙏`,
 
     gujarati: `નમસ્તે ${customerName} 🙏
 
-તમારી ${amountStr ? `*${amountStr}*` : ''}ની payment${overdueStr} હજુ બાકી છે.
+તમારી ${amountStr ? `*${amountStr}*` : ''}ની payment${daysOverdue ? ` (${daysOverdue} દિવસ)` : ''} હજુ બાકી છે.
 
 કૃપા કરીને જલ્દી payment કરો.
 આભાર! 🙏`,

@@ -3,7 +3,10 @@
 const axios = require('axios');
 const { logger } = require('../utils/logger');
 
-const BASE_URL = `https://graph.facebook.com/${process.env.WHATSAPP_API_VERSION || 'v19.0'}`;
+// Sanitise the API version: only allow the pattern vNN.0 (e.g. v19.0)
+const rawVersion = process.env.WHATSAPP_API_VERSION || 'v19.0';
+const API_VERSION = /^v\d{1,3}\.\d{1,3}$/.test(rawVersion) ? rawVersion : 'v19.0';
+const BASE_URL = `https://graph.facebook.com/${API_VERSION}`;
 
 /**
  * Send a plain text message via WhatsApp Cloud API.
