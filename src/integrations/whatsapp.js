@@ -12,22 +12,20 @@ const BASE_URL = `https://graph.facebook.com/${API_VERSION}`;
 const ALLOWED_PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
 /**
- * Resolve and validate the phoneNumberId that will be used in the API URL.
- * Throws if the given ID does not match the configured whitelisted value.
+ * Validate that the phoneNumberId argument matches our configured whitelist value.
+ * Throws if it doesn't, so we never proceed with an untrusted phone ID.
  *
  * @param {string} phoneNumberId
- * @returns {string} The validated phone number ID
  */
-function resolvePhoneId(phoneNumberId) {
+function assertPhoneId(phoneNumberId) {
   if (!ALLOWED_PHONE_ID) {
-    // No whitelist configured — warn and use the provided value
+    // No whitelist configured — warn and allow (dev / test env only)
     logger.warn('WHATSAPP_PHONE_NUMBER_ID not set — cannot validate phoneNumberId');
-    return phoneNumberId;
+    return;
   }
   if (phoneNumberId !== ALLOWED_PHONE_ID) {
-    throw new Error(`phoneNumberId mismatch: "${phoneNumberId}" is not the configured phone number ID`);
+    throw new Error('phoneNumberId mismatch: not the configured phone number ID');
   }
-  return ALLOWED_PHONE_ID;
 }
 
 /**
@@ -38,10 +36,12 @@ function resolvePhoneId(phoneNumberId) {
  * @param {string} text          - Message text
  */
 async function sendWhatsAppMessage(phoneNumberId, to, text) {
-  const safePhoneId = resolvePhoneId(phoneNumberId);
+  // Validate against whitelist first; always use the env-var constant in the URL
+  assertPhoneId(phoneNumberId);
+  const phoneId = ALLOWED_PHONE_ID || phoneNumberId;
   try {
     await axios.post(
-      `${BASE_URL}/${safePhoneId}/messages`,
+      `${BASE_URL}/${phoneId}/messages`,
       {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
@@ -75,7 +75,9 @@ async function sendWhatsAppMessage(phoneNumberId, to, text) {
  * @param {string} filename      - Filename shown to the recipient
  */
 async function sendWhatsAppDocument(phoneNumberId, to, buffer, filename) {
-  const safePhoneId = resolvePhoneId(phoneNumberId);
+  // Validate against whitelist first; always use the env-var constant in the URL
+  assertPhoneId(phoneNumberId);
+  const phoneId = ALLOWED_PHONE_ID || phoneNumberId;
   try {
     // Step 1: Upload media
     const FormData = require('form-data');
@@ -84,7 +86,7 @@ async function sendWhatsAppDocument(phoneNumberId, to, buffer, filename) {
     form.append('messaging_product', 'whatsapp');
 
     const uploadRes = await axios.post(
-      `${BASE_URL}/${safePhoneId}/media`,
+      `${BASE_URL}/${phoneId}/media`,
       form,
       {
         headers: {
@@ -98,7 +100,7 @@ async function sendWhatsAppDocument(phoneNumberId, to, buffer, filename) {
 
     // Step 2: Send document message
     await axios.post(
-      `${BASE_URL}/${safePhoneId}/messages`,
+      `${BASE_URL}/${phoneId}/messages`,
       {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
