@@ -6,7 +6,11 @@ const { handleReminder } = require('../handlers/reminder');
 const { handleInventory } = require('../handlers/inventory');
 const { handleGst } = require('../handlers/gst');
 const { sendWhatsAppMessage } = require('../integrations/whatsapp');
+const { maskPhone } = require('../utils/validate');
 const { logger } = require('../utils/logger');
+
+// Maximum text length we'll process — prevents abuse of the Claude API
+const MAX_MESSAGE_LENGTH = 2000;
 
 /**
  * Route an incoming WhatsApp message to the appropriate handler
@@ -32,11 +36,16 @@ async function routeMessage({ message, from, businessPhoneId }) {
     return;
   }
 
-  logger.info('Incoming message', { from, text });
+  // Guard against empty or oversized messages
+  if (!text || typeof text !== 'string') return;
+  const safeText = text.slice(0, MAX_MESSAGE_LENGTH);
 
-  const { intent, entities, language } = await parseIntent(text);
+  // Log with masked phone to avoid storing PII in logs
+  logger.info('Incoming message', { from: maskPhone(from), length: safeText.length });
 
-  logger.info('Detected intent', { intent, language, from });
+  const { intent, entities, language } = await parseIntent(safeText);
+
+  logger.info('Detected intent', { intent, language, from: maskPhone(from) });
 
   switch (intent) {
     case 'create_invoice':
@@ -65,6 +74,7 @@ async function routeMessage({ message, from, businessPhoneId }) {
       );
   }
 }
+
 
 /**
  * Returns a contextual help message in the user's preferred language.

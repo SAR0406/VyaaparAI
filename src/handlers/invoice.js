@@ -4,6 +4,7 @@ const { generateInvoicePdf } = require('../utils/pdfGenerator');
 const { sendWhatsAppMessage, sendWhatsAppDocument } = require('../integrations/whatsapp');
 const { validateGstin } = require('../integrations/gstPortal');
 const { formatCurrency } = require('../nlp/languages');
+const { sanitizeName, validateAmount } = require('../utils/validate');
 const { logger } = require('../utils/logger');
 
 // GST rates (%) for common product categories
@@ -27,13 +28,19 @@ const GST_RATES = {
  */
 async function handleInvoice({ from, entities, language, businessPhoneId }) {
   const {
-    customer_name: customerName = 'Customer',
-    amount,
+    customer_name: rawCustomerName = 'Customer',
+    amount: rawAmount,
     items = [],
     gstin,
   } = entities;
 
-  if (!amount && items.length === 0) {
+  // Sanitize customer name
+  const customerName = sanitizeName(rawCustomerName) || 'Customer';
+
+  // Validate amount
+  const amount = validateAmount(rawAmount);
+
+  if (amount === null && (!Array.isArray(items) || items.length === 0)) {
     const msg = getErrorMessage('missing_amount', language);
     await sendWhatsAppMessage(businessPhoneId, from, msg);
     return;
@@ -52,7 +59,24 @@ async function handleInvoice({ from, entities, language, businessPhoneId }) {
     }
   }
 
-  const subtotal = amount || items.reduce((sum, i) => sum + (i.price || 0) * (i.quantity || 1), 0);
+  // Sanitize item names in the items array
+  const safeItems = Array.isArray(items)
+    ? items.map((i) => ({
+      name: sanitizeName(String(i.name || 'Item')),
+      quantity: Math.max(0, Number(i.quantity) || 1),
+      price: Math.max(0, Number(i.price) || 0),
+    }))
+    : [];
+
+  const subtotal = amount !== null
+    ? amount
+    : safeItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+
+  if (subtotal <= 0) {
+    await sendWhatsAppMessage(businessPhoneId, from, getErrorMessage('missing_amount', language));
+    return;
+  }
+
   const gstRate = GST_RATES.default;
   const gstAmount = parseFloat(((subtotal * gstRate) / 100).toFixed(2));
   const total = parseFloat((subtotal + gstAmount).toFixed(2));
@@ -62,7 +86,7 @@ async function handleInvoice({ from, entities, language, businessPhoneId }) {
     date: new Date().toLocaleDateString('en-IN'),
     customerName,
     gstin: gstin || null,
-    items: items.length > 0 ? items : [{ name: 'Services/Goods', quantity: 1, price: subtotal }],
+    items: safeItems.length > 0 ? safeItems : [{ name: 'Services/Goods', quantity: 1, price: subtotal }],
     subtotal,
     gstRate,
     gstAmount,
@@ -80,18 +104,20 @@ async function handleInvoice({ from, entities, language, businessPhoneId }) {
     // Send the PDF
     await sendWhatsAppDocument(businessPhoneId, from, pdfBuffer, `invoice_${invoiceData.invoiceNumber}.pdf`);
 
-    logger.info('Invoice created and sent', { from, invoiceNumber: invoiceData.invoiceNumber });
+    logger.info('Invoice created and sent', { invoiceNumber: invoiceData.invoiceNumber });
   } catch (err) {
-    logger.error('Invoice creation failed', { error: err.message, from });
+    logger.error('Invoice creation failed', { error: err.message });
     await sendWhatsAppMessage(businessPhoneId, from, getErrorMessage('invoice_failed', language));
   }
 }
 
 function generateInvoiceNumber() {
+  const crypto = require('crypto');
   const now = new Date();
   const year = now.getFullYear().toString().slice(-2);
   const month = String(now.getMonth() + 1).padStart(2, '0');
-  const random = Math.floor(Math.random() * 9000) + 1000;
+  // Use 4 cryptographically random hex chars (65536 combinations) for uniqueness
+  const random = crypto.randomBytes(2).toString('hex').toUpperCase();
   return `INV-${year}${month}-${random}`;
 }
 

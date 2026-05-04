@@ -2,6 +2,7 @@
 
 const { sendWhatsAppMessage } = require('../integrations/whatsapp');
 const { formatCurrency } = require('../nlp/languages');
+const { sanitizeName, validateAmount, validateQuantity } = require('../utils/validate');
 const { logger } = require('../utils/logger');
 
 // In-memory inventory store (replace with DB in production)
@@ -26,7 +27,8 @@ async function handleInventory({ from, entities, language, businessPhoneId, inte
 }
 
 async function checkInventory({ from, entities, language, businessPhoneId }) {
-  const { item_name: itemName } = entities;
+  const rawItemName = entities.item_name;
+  const itemName = rawItemName ? sanitizeName(String(rawItemName)) : null;
   const key = businessKey(from);
 
   const stock = inventoryStore.get(key) || {};
@@ -47,18 +49,19 @@ async function checkInventory({ from, entities, language, businessPhoneId }) {
     await sendWhatsAppMessage(businessPhoneId, from, msg);
   }
 
-  logger.info('Inventory checked', { from, itemName });
+  logger.info('Inventory checked', { itemName });
 }
 
 async function updateInventory({ from, entities, language, businessPhoneId }) {
-  const {
-    item_name: itemName,
-    quantity = 0,
-    price_per_unit: pricePerUnit = 0,
-    transaction_type: txType = 'purchase',
-  } = entities;
+  const rawItemName = entities.item_name;
+  const itemName = rawItemName ? sanitizeName(String(rawItemName)) : null;
+  const quantity = validateQuantity(entities.quantity);
+  const pricePerUnit = validateAmount(entities.price_per_unit) ?? 0;
+  const txType = ['purchase', 'sale'].includes(entities.transaction_type)
+    ? entities.transaction_type
+    : 'purchase';
 
-  if (!itemName || quantity === 0) {
+  if (!itemName || quantity === null) {
     await sendWhatsAppMessage(businessPhoneId, from, getMissingInfoMessage(language));
     return;
   }
@@ -74,8 +77,8 @@ async function updateInventory({ from, entities, language, businessPhoneId }) {
   } else if (txType === 'sale') {
     currentItem.quantity = Math.max(0, currentItem.quantity - quantity);
   }
-  currentItem.pricePerUnit = pricePerUnit || currentItem.pricePerUnit;
-  currentItem.totalValue = currentItem.quantity * currentItem.pricePerUnit;
+  currentItem.pricePerUnit = pricePerUnit > 0 ? pricePerUnit : currentItem.pricePerUnit;
+  currentItem.totalValue = parseFloat((currentItem.quantity * currentItem.pricePerUnit).toFixed(2));
   currentItem.lastUpdated = new Date().toLocaleDateString('en-IN');
 
   stock[itemKey] = currentItem;
@@ -84,8 +87,9 @@ async function updateInventory({ from, entities, language, businessPhoneId }) {
   const msg = getUpdateConfirmMessage({ itemName, quantity, txType, currentItem, language });
   await sendWhatsAppMessage(businessPhoneId, from, msg);
 
-  logger.info('Inventory updated', { from, itemName, quantity, txType });
+  logger.info('Inventory updated', { itemName, quantity, txType });
 }
+
 
 function businessKey(phone) {
   return `biz_${phone}`;

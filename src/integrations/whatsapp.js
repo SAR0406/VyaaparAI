@@ -8,6 +8,28 @@ const rawVersion = process.env.WHATSAPP_API_VERSION || 'v19.0';
 const API_VERSION = /^v\d{1,3}\.\d{1,3}$/.test(rawVersion) ? rawVersion : 'v19.0';
 const BASE_URL = `https://graph.facebook.com/${API_VERSION}`;
 
+// Whitelist of allowed phone number IDs — prevents SSRF from attacker-controlled payloads
+const ALLOWED_PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+/**
+ * Resolve and validate the phoneNumberId that will be used in the API URL.
+ * Throws if the given ID does not match the configured whitelisted value.
+ *
+ * @param {string} phoneNumberId
+ * @returns {string} The validated phone number ID
+ */
+function resolvePhoneId(phoneNumberId) {
+  if (!ALLOWED_PHONE_ID) {
+    // No whitelist configured — warn and use the provided value
+    logger.warn('WHATSAPP_PHONE_NUMBER_ID not set — cannot validate phoneNumberId');
+    return phoneNumberId;
+  }
+  if (phoneNumberId !== ALLOWED_PHONE_ID) {
+    throw new Error(`phoneNumberId mismatch: "${phoneNumberId}" is not the configured phone number ID`);
+  }
+  return ALLOWED_PHONE_ID;
+}
+
 /**
  * Send a plain text message via WhatsApp Cloud API.
  *
@@ -16,9 +38,10 @@ const BASE_URL = `https://graph.facebook.com/${API_VERSION}`;
  * @param {string} text          - Message text
  */
 async function sendWhatsAppMessage(phoneNumberId, to, text) {
+  const safePhoneId = resolvePhoneId(phoneNumberId);
   try {
     await axios.post(
-      `${BASE_URL}/${phoneNumberId}/messages`,
+      `${BASE_URL}/${safePhoneId}/messages`,
       {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
@@ -33,10 +56,9 @@ async function sendWhatsAppMessage(phoneNumberId, to, text) {
         },
       },
     );
-    logger.info('WhatsApp message sent', { to, length: text.length });
+    logger.info('WhatsApp message sent', { length: text.length });
   } catch (err) {
     logger.error('Failed to send WhatsApp message', {
-      to,
       error: err.response?.data || err.message,
     });
     throw err;
@@ -53,6 +75,7 @@ async function sendWhatsAppMessage(phoneNumberId, to, text) {
  * @param {string} filename      - Filename shown to the recipient
  */
 async function sendWhatsAppDocument(phoneNumberId, to, buffer, filename) {
+  const safePhoneId = resolvePhoneId(phoneNumberId);
   try {
     // Step 1: Upload media
     const FormData = require('form-data');
@@ -61,7 +84,7 @@ async function sendWhatsAppDocument(phoneNumberId, to, buffer, filename) {
     form.append('messaging_product', 'whatsapp');
 
     const uploadRes = await axios.post(
-      `${BASE_URL}/${phoneNumberId}/media`,
+      `${BASE_URL}/${safePhoneId}/media`,
       form,
       {
         headers: {
@@ -75,7 +98,7 @@ async function sendWhatsAppDocument(phoneNumberId, to, buffer, filename) {
 
     // Step 2: Send document message
     await axios.post(
-      `${BASE_URL}/${phoneNumberId}/messages`,
+      `${BASE_URL}/${safePhoneId}/messages`,
       {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
@@ -95,10 +118,9 @@ async function sendWhatsAppDocument(phoneNumberId, to, buffer, filename) {
       },
     );
 
-    logger.info('WhatsApp document sent', { to, filename });
+    logger.info('WhatsApp document sent', { filename });
   } catch (err) {
     logger.error('Failed to send WhatsApp document', {
-      to,
       filename,
       error: err.response?.data || err.message,
     });

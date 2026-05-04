@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const Razorpay = require('razorpay');
 const { logger } = require('../utils/logger');
 
@@ -40,7 +41,6 @@ const PLANS = {
  * Create a new Razorpay subscription for a business.
  *
  * @param {object} params
- * @param {string} params.planKey - 'starter' | 'growth' | 'enterprise'
  * @param {string} params.planId  - Razorpay Plan ID (created in dashboard)
  * @param {number} params.totalCount - Total billing cycles (e.g., 12 for annual)
  * @param {string} params.customerPhone
@@ -61,10 +61,7 @@ async function createSubscription({ planId, totalCount = 12, customerPhone, cust
       },
     });
 
-    logger.info('Razorpay subscription created', {
-      subscriptionId: subscription.id,
-      customerPhone,
-    });
+    logger.info('Razorpay subscription created', { subscriptionId: subscription.id });
 
     return subscription;
   } catch (err) {
@@ -74,7 +71,7 @@ async function createSubscription({ planId, totalCount = 12, customerPhone, cust
 }
 
 /**
- * Verify a Razorpay payment signature (webhook validation).
+ * Verify a Razorpay payment signature for order-based payments.
  *
  * @param {string} orderId
  * @param {string} paymentId
@@ -82,13 +79,62 @@ async function createSubscription({ planId, totalCount = 12, customerPhone, cust
  * @returns {boolean}
  */
 function verifyPaymentSignature(orderId, paymentId, signature) {
-  const crypto = require('crypto');
   const body = `${orderId}|${paymentId}`;
   const expectedSignature = crypto
     .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
     .update(body)
     .digest('hex');
-  return expectedSignature === signature;
+  return crypto.timingSafeEqual(
+    Buffer.from(expectedSignature, 'hex'),
+    Buffer.from(signature, 'hex'),
+  );
+}
+
+/**
+ * Verify a Razorpay webhook event signature.
+ * Razorpay signs webhook payloads using HMAC-SHA256 with the webhook secret.
+ *
+ * @param {Buffer|string} rawBody   - Raw request body (must not be parsed)
+ * @param {string}        signature - Value of 'X-Razorpay-Signature' header
+ * @returns {boolean}
+ */
+function verifyWebhookSignature(rawBody, signature) {
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    logger.warn('RAZORPAY_WEBHOOK_SECRET not set — skipping webhook signature check');
+    return false;
+  }
+  if (!signature || !rawBody) return false;
+
+  const expected = crypto
+    .createHmac('sha256', webhookSecret)
+    .update(rawBody)
+    .digest('hex');
+
+  const sigBuf = Buffer.from(signature, 'hex');
+  const expBuf = Buffer.from(expected, 'hex');
+
+  if (sigBuf.length !== expBuf.length) return false;
+  return crypto.timingSafeEqual(sigBuf, expBuf);
+}
+
+/**
+ * Express middleware that validates the Razorpay webhook signature.
+ * Mount on the Razorpay webhook route BEFORE parsing the body.
+ *
+ * @param {import('express').Request}  req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+function razorpayWebhookAuth(req, res, next) {
+  const signature = req.headers['x-razorpay-signature'];
+  const rawBody = req.rawBody;
+
+  if (!verifyWebhookSignature(rawBody, signature)) {
+    logger.warn('Razorpay webhook rejected: invalid signature');
+    return res.sendStatus(401);
+  }
+  return next();
 }
 
 /**
@@ -125,4 +171,11 @@ async function createPaymentLink({ planKey, customerPhone, customerName }) {
   }
 }
 
-module.exports = { createSubscription, verifyPaymentSignature, createPaymentLink, PLANS };
+module.exports = {
+  createSubscription,
+  verifyPaymentSignature,
+  verifyWebhookSignature,
+  razorpayWebhookAuth,
+  createPaymentLink,
+  PLANS,
+};

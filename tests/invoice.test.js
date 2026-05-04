@@ -5,7 +5,8 @@ const { generateInvoiceNumber, GST_RATES } = require('../src/handlers/invoice');
 describe('Invoice Number Generation', () => {
   test('generates invoice number matching expected format', () => {
     const num = generateInvoiceNumber();
-    expect(num).toMatch(/^INV-\d{4}-\d{4}$/);
+    // Format: INV-YYMM-XXXX where XXXX is 4 uppercase hex chars from crypto.randomBytes
+    expect(num).toMatch(/^INV-\d{4}-[0-9A-F]{4}$/);
   });
 
   test('generates unique invoice numbers', () => {

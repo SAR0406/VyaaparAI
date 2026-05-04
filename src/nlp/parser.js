@@ -1,6 +1,7 @@
 'use strict';
 
 const Anthropic = require('@anthropic-ai/sdk');
+const { validateNlpOutput } = require('../utils/validate');
 const { logger } = require('../utils/logger');
 
 const client = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
@@ -45,6 +46,7 @@ Output: {
 
 /**
  * Parse the intent and extract structured entities from a message.
+ * Validates and sanitizes the Claude output before returning it.
  *
  * @param {string} text - Raw message text from the user
  * @returns {Promise<{intent: string, entities: object, language: string, confidence: number}>}
@@ -59,16 +61,25 @@ async function parseIntent(text) {
     });
 
     const raw = response.content[0].text.trim();
-    const parsed = JSON.parse(raw);
 
-    return {
-      intent: parsed.intent || 'unknown',
-      entities: parsed.entities || {},
-      language: parsed.language || 'hindi',
-      confidence: parsed.confidence || 0.5,
-    };
+    // Parse JSON — only allow plain objects (not arrays)
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      logger.error('NLP response is not valid JSON', { preview: raw.slice(0, 100) });
+      return { intent: 'unknown', entities: {}, language: 'hindi', confidence: 0 };
+    }
+
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      logger.error('NLP response has unexpected shape');
+      return { intent: 'unknown', entities: {}, language: 'hindi', confidence: 0 };
+    }
+
+    // Validate and sanitize all fields before returning
+    return validateNlpOutput(parsed);
   } catch (err) {
-    logger.error('NLP parsing error', { error: err.message, text });
+    logger.error('NLP parsing error', { error: err.message });
     return { intent: 'unknown', entities: {}, language: 'hindi', confidence: 0 };
   }
 }
