@@ -1,10 +1,11 @@
 'use strict';
 
-const Anthropic = require('@anthropic-ai/sdk');
+const axios = require('axios');
 const { validateNlpOutput } = require('../utils/validate');
 const { logger } = require('../utils/logger');
 
-const client = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
+const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
+const NVIDIA_MODEL = 'moonshotai/kimi-k2.6';
 
 const SYSTEM_PROMPT = `You are VyapaarAI, an intelligent business assistant for small Indian businesses (MSMEs).
 You understand Hindi, Marathi, Gujarati, Tamil, and English.
@@ -46,21 +47,39 @@ Output: {
 
 /**
  * Parse the intent and extract structured entities from a message.
- * Validates and sanitizes the Claude output before returning it.
+ * Validates and sanitizes the model output before returning it.
  *
  * @param {string} text - Raw message text from the user
  * @returns {Promise<{intent: string, entities: object, language: string, confidence: number}>}
  */
 async function parseIntent(text) {
   try {
-    const response = await client.messages.create({
-      model: process.env.CLAUDE_MODEL || 'claude-3-5-sonnet-20241022',
-      max_tokens: 512,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: text }],
-    });
+    const response = await axios.post(
+      NVIDIA_API_URL,
+      {
+        model: NVIDIA_MODEL,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: text },
+        ],
+        max_tokens: 512,
+        temperature: 1.0,
+        top_p: 1.0,
+        stream: false,
+        chat_template_kwargs: { thinking: true },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      },
+    );
 
-    const raw = response.content[0].text.trim();
+    // Strip chain-of-thought <think>...</think> blocks the model may prepend
+    const raw = response.data.choices[0].message.content
+      .replace(/<think>[\s\S]*?<\/think>/g, '')
+      .trim();
 
     // Parse JSON — only allow plain objects (not arrays)
     let parsed;
