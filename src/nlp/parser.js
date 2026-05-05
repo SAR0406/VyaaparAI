@@ -66,6 +66,8 @@ async function parseIntent(text) {
         temperature: 1.0,
         top_p: 1.0,
         stream: false,
+        // Enables chain-of-thought reasoning; the model wraps its thinking in
+        // <think>...</think> tags which are stripped from the response below.
         chat_template_kwargs: { thinking: true },
       },
       {
